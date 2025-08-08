@@ -2,17 +2,35 @@ import playwright.sync_api
 import requests
 import flask
 import os
+import time
+import logging
+
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 def setup_solver():
-    if not os.path.exists("utils"): os.mkdir("utils")
+    if not os.path.exists("utils"):
+        os.mkdir("utils")
+    
     files = [
-        "https://raw.githubusercontent.com/Body-Alhoha/turnaround/main/utils/solver.py",
-        "https://raw.githubusercontent.com/Body-Alhoha/turnaround/main/utils/page.html"
+        ("solver.py", "https://raw.githubusercontent.com/Body-Alhoha/turnaround/main/utils/solver.py"),
+        ("page.html", "https://raw.githubusercontent.com/Body-Alhoha/turnaround/main/utils/page.html")
     ]
-    for file in files:
-        r = requests.get(file).text
-        with open("utils/" + file.split("/")[-1], "w") as f:
-            f.write(r)
+    
+    for filename, url in files:
+        try:
+            if not os.path.exists(f"utils/{filename}"):
+                r = requests.get(url, timeout=10)
+                r.raise_for_status()
+                with open(f"utils/{filename}", "w") as f:
+                    f.write(r.text)
+                logger.info(f"Downloaded {filename}")
+        except Exception as e:
+            logger.error(f"Failed to download {filename}: {str(e)}")
+            if not os.path.exists(f"utils/{filename}"):
+                raise RuntimeError(f"Critical file {filename} missing")
+
 
 setup_solver()
 app = flask.Flask(__name__)
@@ -24,24 +42,61 @@ def index():
 
 @app.route("/health")
 def health():
-    return {"status": "healthy"}
+    return {"status": "healthy", "timestamp": time.time()}
 
 @app.route("/solve", methods=["POST"])
-def solve():
-    json_data = flask.request.json
-    sitekey = json_data["sitekey"]
-    invisible = json_data["invisible"]
-    url = json_data["url"]
-    proxy = json_data.get('proxy')
+def solve_captcha():
+    start_time = time.time()
     
-    with playwright.sync_api.sync_playwright() as p:
-        s = solver.Solver(p, proxy=proxy, headless=True)
-        token = s.solve(url, sitekey, invisible)
-        s.terminate()
+    if not flask.request.is_json:
         return flask.jsonify({
-            "status": "success" if token != "failed" else "error",
-            "token": token if token != "failed" else None
-        })
+            "status": "error",
+            "message": "Content-Type must be application/json",
+            "time_elapsed": round(time.time() - start_time, 2)
+        }), 400
+    
+    try:
+        data = flask.request.get_json()
+        required = ["sitekey", "url", "invisible"]
+        if not all(k in data for k in required):
+            return flask.jsonify({
+                "status": "error",
+                "message": f"Missing required fields: {required}",
+                "time_elapsed": round(time.time() - start_time, 2)
+            }), 400
+        
+        logger.info(f"Solving captcha for {data['url']}")
+        
+        with playwright.sync_api.sync_playwright() as p:
+            captcha_solver = solver.Solver(
+                p,
+                proxy=data.get('proxy'),
+                headless=True
+            )
+            
+            try:
+                token = captcha_solver.solve(
+                    data['url'],
+                    data['sitekey'],
+                    data['invisible']
+                )
+                
+                return flask.jsonify({
+                    "status": "success" if token != "failed" else "error",
+                    "token": token if token != "failed" else None,
+                    "time_elapsed": round(time.time() - start_time, 2)
+                })
+                
+            finally:
+                captcha_solver.terminate()
+                
+    except Exception as e:
+        logger.error(f"Captcha solve error: {str(e)}", exc_info=True)
+        return flask.jsonify({
+            "status": "error",
+            "message": str(e),
+            "time_elapsed": round(time.time() - start_time, 2)
+        }), 500
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
