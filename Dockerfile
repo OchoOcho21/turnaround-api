@@ -27,14 +27,13 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 3. Force install specific Playwright browser versions
+# 3. Install Playwright browsers (Chromium only to save space)
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 RUN python -m playwright install --with-deps chromium
-RUN python -m playwright install --with-deps firefox
-RUN python -m playwright install --with-deps webkit
+RUN python -m playwright install-deps
 
-# 4. Verify installation
-RUN python -c "from playwright.sync_api import sync_playwright; with sync_playwright() as p: print(p.chromium.launch().version)"
+# 4. Verify installation with proper Python syntax
+RUN python -c "from playwright.sync_api import sync_playwright; p = sync_playwright().start(); print(p.chromium.launch().version); p.stop()"
 
 # 5. Copy app files
 COPY . .
