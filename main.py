@@ -4,10 +4,29 @@ import flask
 import os
 import time
 import logging
+from typing import Optional
 
-
+# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+def verify_browsers():
+    """Ensure all browsers are properly installed"""
+    try:
+        with playwright.sync_api.sync_playwright() as p:
+            for browser_type in [p.chromium, p.firefox, p.webkit]:
+                try:
+                    browser = browser_type.launch(headless=True)
+                    version = browser.version
+                    browser.close()
+                    logger.info(f"{browser_type.name} verified (v{version})")
+                except Exception as e:
+                    logger.error(f"Browser {browser_type.name} failed: {str(e)}")
+                    raise RuntimeError(f"Browser {browser_type.name} not functional")
+        return True
+    except Exception as e:
+        logger.critical(f"Browser verification failed: {str(e)}")
+        return False
 
 def setup_solver():
     if not os.path.exists("utils"):
@@ -25,14 +44,16 @@ def setup_solver():
                 r.raise_for_status()
                 with open(f"utils/{filename}", "w") as f:
                     f.write(r.text)
-                logger.info(f"Downloaded {filename}")
         except Exception as e:
             logger.error(f"Failed to download {filename}: {str(e)}")
             if not os.path.exists(f"utils/{filename}"):
                 raise RuntimeError(f"Critical file {filename} missing")
 
-
+# Initialize
 setup_solver()
+if not verify_browsers():
+    raise RuntimeError("Browser verification failed - check Dockerfile installation")
+
 app = flask.Flask(__name__)
 from utils import solver
 
@@ -42,7 +63,11 @@ def index():
 
 @app.route("/health")
 def health():
-    return {"status": "healthy", "timestamp": time.time()}
+    return {
+        "status": "healthy",
+        "timestamp": time.time(),
+        "browsers": ["chromium", "firefox", "webkit"]
+    }
 
 @app.route("/solve", methods=["POST"])
 def solve_captcha():
@@ -68,8 +93,11 @@ def solve_captcha():
         logger.info(f"Solving captcha for {data['url']}")
         
         with playwright.sync_api.sync_playwright() as p:
+            # Force chromium if others fail
+            browser_type = p.chromium
             captcha_solver = solver.Solver(
                 p,
+                browser_type=browser_type,
                 proxy=data.get('proxy'),
                 headless=True
             )
@@ -84,6 +112,7 @@ def solve_captcha():
                 return flask.jsonify({
                     "status": "success" if token != "failed" else "error",
                     "token": token if token != "failed" else None,
+                    "browser": browser_type.name,
                     "time_elapsed": round(time.time() - start_time, 2)
                 })
                 
