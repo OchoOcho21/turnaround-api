@@ -1,6 +1,6 @@
 FROM python:3.9-slim
 
-# 1. Install system dependencies + playwright browsers
+# 1. Install system dependencies with clean apt cache
 RUN apt-get update && \
     apt-get install -y \
     wget \
@@ -17,22 +17,26 @@ RUN apt-get update && \
     libxrandr2 \
     libgbm1 \
     libasound2 \
+    fonts-liberation \
+    libglu1 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# 2. Install Python dependencies first (caching optimization)
+# 2. Install Python dependencies first for caching
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 3. Install Playwright and browsers
-RUN python -m playwright install
-RUN python -m playwright install-deps
-
-# 4. Copy app files
-COPY . .
-
-# 5. Set explicit browser path
+# 3. Force install specific Playwright browser versions
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN python -m playwright install --with-deps chromium
+RUN python -m playwright install --with-deps firefox
+RUN python -m playwright install --with-deps webkit
+
+# 4. Verify installation
+RUN python -c "from playwright.sync_api import sync_playwright; with sync_playwright() as p: print(p.chromium.launch().version)"
+
+# 5. Copy app files
+COPY . .
 
 CMD ["gunicorn", "main:app"]
