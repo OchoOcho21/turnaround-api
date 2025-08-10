@@ -29,22 +29,21 @@ setup_solver()
 app = Quart(__name__)
 
 async def solve_captcha(url, sitekey, invisible, proxy=None):
+    solver = None
     try:
         solver = Solver(proxy=proxy, headless=True)
         start_time = time.time()
         print(f'Solving captcha with proxy: {proxy or "No proxy"}')
-        try:
-            token = await solver.solve(url, sitekey, invisible)
+        token = await solver.solve(url, sitekey, invisible)
+        if token != "failed":
             print(f"Success in {time.time()-start_time:.2f}s, token: {token[:10]}...")
-            return token
-        except Exception as solve_error:
-            print(f"Solve error: {str(solve_error)}")
-            return "failed"
-        finally:
-            await solver.terminate()
-    except Exception as init_error:
-        print(f"Solver initialization error: {str(init_error)}")
+        return token
+    except Exception as e:
+        print(f"Solve error: {str(e)}")
         return "failed"
+    finally:
+        if solver:
+            await solver.terminate()
 
 @app.route("/")
 async def index():
@@ -68,11 +67,10 @@ async def solve():
             json_data.get('proxy')
         )
 
-        response = {
+        return jsonify({
             "status": "success" if token != "failed" else "error",
             "token": token if token != "failed" else None
-        }
-        return jsonify(response)
+        })
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
