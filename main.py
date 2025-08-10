@@ -38,23 +38,28 @@ setup_solver()
 app = Quart(__name__)
 
 async def solve_captcha(url, sitekey, invisible, proxy=None):
+    solver = None
     try:
         solver = Solver(proxy=proxy, headless=True)
         start_time = time.time()
         print(f'Solving captcha with proxy: {proxy or "No proxy"}')
         
         try:
-            token = await solver.solve(url, sitekey, invisible)
-            print(f"Success in {time.time()-start_time:.2f}s, token: {token[:10]}...")
+            token = await asyncio.wait_for(
+                solver.solve(url, sitekey, invisible),
+                timeout=60
+            )
+            print(f"Solved in {time.time()-start_time:.2f}s")
             return token
-        except Exception as solve_error:
-            print(f"Solve error: {str(solve_error)}")
+        except asyncio.TimeoutError:
+            print("Captcha solving timed out")
             return "failed"
-        finally:
-            await solver.terminate()
-    except Exception as init_error:
-        print(f"Solver initialization error: {str(init_error)}")
-        return "failed"
+        except Exception as e:
+            print(f"Solve error: {str(e)}")
+            return "failed"
+    finally:
+        if solver:
+            await solver._safe_close()
 
 @app.route("/")
 async def index():
