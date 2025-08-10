@@ -1,6 +1,6 @@
 import asyncio
 import requests
-import flask
+import quart
 import json
 import time
 import os
@@ -19,7 +19,7 @@ def setup_solver():
             f.write(r)
 
 setup_solver()
-app = flask.Flask(__name__)
+app = quart.Quart(__name__)
 from utils.solver import Solver
 
 async def solve_captcha(url, sitekey, invisible, proxy=None):
@@ -34,24 +34,24 @@ async def solve_captcha(url, sitekey, invisible, proxy=None):
         await solver.terminate()
 
 @app.route("/")
-def index():
-    return flask.redirect("https://github.com/OchoOcho21/turnaround-api")
+async def index():
+    return quart.redirect("https://github.com/OchoOcho21/turnaround-api")
 
 @app.route("/solve", methods=["POST"])
 async def solve():
-    json_data = flask.request.json
+    json_data = await quart.request.get_json()
     sitekey = json_data["sitekey"]
     invisible = json_data["invisible"]
     url = json_data["url"]
     proxy = json_data.get('proxy')
     
     token = await solve_captcha(url, sitekey, invisible, proxy)
-    return make_response(token)
+    return await make_response(token)
 
-def make_response(captcha_key):
+async def make_response(captcha_key):
     if captcha_key == "failed":
-        return flask.jsonify({"status": "error", "token": None})
-    return flask.jsonify({"status": "success", "token": captcha_key})
+        return quart.jsonify({"status": "error", "token": None})
+    return quart.jsonify({"status": "success", "token": captcha_key})
 
 if __name__ == "__main__":
     port = 12019
