@@ -40,7 +40,7 @@ async def solve_captcha(url, sitekey, invisible, proxy=None):
 
 @app.route("/")
 async def index():
-    return redirect("https://github.com/Euro-pol/turnaround-api")
+    return redirect("https://github.com/OchoOcho21/turnaround-api")
 
 @app.route("/solve", methods=["POST"])
 async def solve():
