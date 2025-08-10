@@ -4,18 +4,10 @@ import os
 import time
 from utils.solver import Solver
 
-
 try:
     from quart import Quart, request, jsonify, redirect
 except ImportError:
     raise ImportError("Please install Quart with: pip install quart==0.18.3")
-
-
-try:
-    import pyppeteer
-    from pyppeteer import launch
-except ImportError:
-    raise ImportError("Please install Pyppeteer with: pip install pyppeteer")
 
 def setup_solver():
     if not os.path.exists("utils"): 
@@ -33,33 +25,26 @@ def setup_solver():
         except Exception as e:
             print(f"Error downloading {file}: {str(e)}")
 
-
 setup_solver()
 app = Quart(__name__)
 
 async def solve_captcha(url, sitekey, invisible, proxy=None):
-    solver = None
     try:
         solver = Solver(proxy=proxy, headless=True)
         start_time = time.time()
         print(f'Solving captcha with proxy: {proxy or "No proxy"}')
-        
         try:
-            token = await asyncio.wait_for(
-                solver.solve(url, sitekey, invisible),
-                timeout=60
-            )
-            print(f"Solved in {time.time()-start_time:.2f}s")
+            token = await solver.solve(url, sitekey, invisible)
+            print(f"Success in {time.time()-start_time:.2f}s, token: {token[:10]}...")
             return token
-        except asyncio.TimeoutError:
-            print("Captcha solving timed out")
+        except Exception as solve_error:
+            print(f"Solve error: {str(solve_error)}")
             return "failed"
-        except Exception as e:
-            print(f"Solve error: {str(e)}")
-            return "failed"
-    finally:
-        if solver:
-            await solver._safe_close()
+        finally:
+            await solver.terminate()
+    except Exception as init_error:
+        print(f"Solver initialization error: {str(init_error)}")
+        return "failed"
 
 @app.route("/")
 async def index():
@@ -71,7 +56,7 @@ async def solve():
         json_data = await request.get_json()
         if not json_data:
             return jsonify({"status": "error", "message": "No JSON data"}), 400
-            
+
         required = ["sitekey", "invisible", "url"]
         if any(field not in json_data for field in required):
             return jsonify({"status": "error", "message": "Missing fields"}), 400
@@ -82,7 +67,7 @@ async def solve():
             json_data["invisible"],
             json_data.get('proxy')
         )
-        
+
         response = {
             "status": "success" if token != "failed" else "error",
             "token": token if token != "failed" else None
