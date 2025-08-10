@@ -1,7 +1,6 @@
 import asyncio
 import requests
 import os
-import pyppeteer
 import time
 from utils.solver import Solver
 
@@ -11,6 +10,13 @@ try:
 except ImportError:
     raise ImportError("Please install Quart with: pip install quart==0.18.3")
 
+
+try:
+    import pyppeteer
+    from pyppeteer import launch
+except ImportError:
+    raise ImportError("Please install Pyppeteer with: pip install pyppeteer")
+
 def setup_solver():
     if not os.path.exists("utils"): 
         os.mkdir("utils")
@@ -19,26 +25,36 @@ def setup_solver():
         "https://raw.githubusercontent.com/OchoOcho21/ocho-turnstile-solver/main/utils/page.html"
     ]
     for file in files:
-        r = requests.get(file).text
-        with open("utils/" + file.split("/")[-1], "w") as f:
-            f.write(r)
+        try:
+            r = requests.get(file, timeout=10)
+            r.raise_for_status()
+            with open("utils/" + file.split("/")[-1], "w", encoding='utf-8') as f:
+                f.write(r.text)
+        except Exception as e:
+            print(f"Error downloading {file}: {str(e)}")
+
 
 setup_solver()
 app = Quart(__name__)
 
 async def solve_captcha(url, sitekey, invisible, proxy=None):
-    solver = Solver(proxy=proxy, headless=True)
     try:
+        solver = Solver(proxy=proxy, headless=True)
         start_time = time.time()
-        print(f'Solving captcha with proxy: {proxy}')
-        token = await solver.solve(url, sitekey, invisible)
-        print(f"took {time.time() - start_time} seconds :: {token[:10]}")
-        return token
-    except Exception as e:
-        print(f"Error solving captcha: {str(e)}")
+        print(f'Solving captcha with proxy: {proxy or "No proxy"}')
+        
+        try:
+            token = await solver.solve(url, sitekey, invisible)
+            print(f"Success in {time.time()-start_time:.2f}s, token: {token[:10]}...")
+            return token
+        except Exception as solve_error:
+            print(f"Solve error: {str(solve_error)}")
+            return "failed"
+        finally:
+            await solver.terminate()
+    except Exception as init_error:
+        print(f"Solver initialization error: {str(init_error)}")
         return "failed"
-    finally:
-        await solver.terminate()
 
 @app.route("/")
 async def index():
@@ -49,11 +65,11 @@ async def solve():
     try:
         json_data = await request.get_json()
         if not json_data:
-            return jsonify({"status": "error", "message": "No JSON data provided"}), 400
+            return jsonify({"status": "error", "message": "No JSON data"}), 400
             
-        required_fields = ["sitekey", "invisible", "url"]
-        if not all(field in json_data for field in required_fields):
-            return jsonify({"status": "error", "message": "Missing required fields"}), 400
+        required = ["sitekey", "invisible", "url"]
+        if any(field not in json_data for field in required):
+            return jsonify({"status": "error", "message": "Missing fields"}), 400
 
         token = await solve_captcha(
             json_data["url"],
@@ -62,10 +78,11 @@ async def solve():
             json_data.get('proxy')
         )
         
-        return jsonify({
+        response = {
             "status": "success" if token != "failed" else "error",
             "token": token if token != "failed" else None
-        })
+        }
+        return jsonify(response)
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
